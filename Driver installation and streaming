@@ -1,0 +1,53 @@
+INSTALL UV4L CAMERA DRIVER
+This Userspace Video4Linux2 (v4l2) driver for the Raspberry Pi CSI Camera Board is needed for motion, MJPG-streamer, SimpleCV, fswebcam and other tools. The following is a summary from linux-projects.org HowTo to get the driver running.
+wget http://www.linux-projects.org/listing/uv4l_repo/lrkey.asc && sudo apt-key add ./lrkey.asc  
+echo "deb http://www.linux-projects.org/listing/uv4l_repo/raspbian/ wheezy main" | sudo tee -a /etc/apt/sources.list  
+sudo apt-get update  
+sudo apt-get install uv4l uv4l-raspicam uv4l-raspicam-extras uv4l-server uv4l-uvc uv4l-xscreen uv4l-mjpegstream  
+sodu reboot  
+After running those commands, the driver will be loaded at boot time because it is linked with /etc/rcS.d/S04uv4l_raspicam and the file /etc/environment will contain the following line LD_PRELOAD=/usr/lib/uv4l/uv4lext/armv6l/libuv4lext.so, which is needed by applications using the driver. After the reboot you can check with ls /dev/video* that the driver created a new video device. 
+What data is returned when reading from e.g. /dev/video0 is configured in the config file of the driver. It is here: /etc/uv4l/uv4l-raspicam.conf. To make a backup copy of it type sudo cp /etc/uv4l/uv4l-raspicam.conf /etc/uv4l/uv4l-raspicam_backup.conf. 
+This config file is extremely important. It allows you to set all supported camera properties for images or videos returned when reading from /dev/video0. Well most settings like image size, hue or saturation can also be controlled by the programs using the driver but if not then you can set them in uv4l-raspicam.conf. 
+To see a list of available configuration options type uv4l --help --driver raspicam --driver-help or see here. There are two interesting commands that show supported settings of the camera device. First v4l2-ctl -d /dev/video0 -l which lists all camera control values and their values like 'brightness', 'sharpness', 'exposuremode', and 'textoverlay' and second v4l2-ctl --list-formats-ext which shows the supported output pixel formats of the Raspberry Pi V4L2 camera driver like 'MJPEG', 'JPEG', 'H264' and 'YU12'(YUV 4:2:0). 
+After changing the config file, the driver must be restarted with sudo service uv4l_raspicam restart. Sometimes the device cannot be registered as /dev/video0, then you can run sudo pkill uv4l and then restart the driver. 
+
+STREAM LIVE VIDEO IN YOUR BROWSER
+If you followed the steps till here, then you can already see your RPi Camera video stream at http://raspberrypi:8080/stream or http://[pi-ip-address]:8080/stream (tested with Google Chrome on Windows 8.1) or in VLC player you can open the network stream at http://[pi-ip-address]:8080/stream/video.mjpeg. The stream is not displayed on Windows Phone 8.1. The stream can only be consumed by one client at the same time. You can even control many settings on the fly from a control panel: http://raspberrypi:8080/panel. Some settings, like the resolution, cannot be changed in the control panel. These must be edited in the driver configuration file and the driver must be restarted afterwards as described in the previous section. If you have DynamicDNS configured and port forwarding configured, then you can access your Camera from the internet (see Free Dynamic DNS Service Subdomain HowTo). 
+To add password protection for the video stream or to disable it, add the following lines to the /etc/uv4l/uv4l-raspicam.conf core options section and restart the driver.
+enable-server = auto                          #'auto', 'required', 'off'  
+server-option = --port=8080                   #streaming server port  
+server-option = --admin-password=helloworld   #streaming server 'admin' password  
+server-option = --user-password=hellow        #streaming server 'user' password  
+
+TAKING PICTURES AND VIDEOS ON THE COMMAND LINE
+The command line tools raspistill, raspistillyuv and raspivid are intended to be used with the RPi camera (see here and the UV4L plug-in driver manual here). raspistillyuv seems not to exist in my Raspian Image. 
+In the next example the shutter speed is set explicitly at 1/400 of a second (2500 micro seconds) so that walking people in the picture are not blurred. Further width and height values are set for a resolution of 1 Megapixel and the jpg quality is set to 75%. The options --nopreview and --timeout 1 will skip the default 5 second preview.
+raspistill --nopreview --timeout 1 --shutter 2500 --width 1280 --height 960 --quality 75 --output test2.jpg  
+To save as .bmp or .png, simply change the output file name extension. To rotate or flip the image, you can use the --rotation, --hflip and --vflip options. With raspistill you cannot add a text overlay, however with the fswebcam tool this is very easy. You can install it with sudo apt-get install -y fswebcam and take a picture with
+fswebcam -v -d /dev/video0 -r 1920x1080 -p mjpeg --title "This picture was taken from directory '`pwd`' at `date`" --no-timestamp --jpeg 100 fswebcam.jpg  
+Now let us test how fast pictures can be taken with the following command, which takes as much pictures as possible for 10 seconds
+raspistill --nopreview --shutter 2500 --width 1280 --height 960 --quality 75 --timeout 10000 --timelapse 0 --output timelapse_test%04d.jpg  
+In 10 seconds, I only get about 17 pictures (7 pictures before the rpi-update). For lower resolutions or with overclocking the RPi's CPU, the amount of pictures does not increase. 
+Less than two pictures per second is not enough for surveillance because you may miss the frame that allows you to recognize the intruder. So how about using video to generate jpg files? Raspivid cannot output jpg files but avconv can. You can install it with sudo apt-get install -y libav-tools. So the following command will give you 5 jpg files per second for 10 seconds from the /dev/video0 device with pretty good quality (qscale 2) but with lower resolution
+avconv -an -r 25 -s 640x480 -f video4linux2 -input_format mjpeg -i /dev/video0 -r 5 -qscale 2 -t 10 -f image2 video_frame_%04d.jpg  
+(see avconv -h or avconv Doc for an explanation of the options). Note that you can change the driver settings in /etc/uv4l/uv4l-raspicam.conf to influence the avconv output. 
+Raspivid is simpler to use as avconv but it can only record .h264 (=MPEG-4 but != mp4) video files. Here are a few examples: 
+10 second video with 1 Mpx resolution in wide format with 49 frames per second
+raspivid --nopreview --shutter 2500 --width 1280 --height 720 --framerate 49 --timeout 10000 --output video_1Mpx_49fps_wide.h264  
+Same as above but with low bitrate to reduce file size
+raspivid --nopreview --shutter 2500 --width 1280 --height 720 --framerate 49 --timeout 10000 --bitrate 2000000 --output video_1Mpx_49fps_wide_low_bitrate.h264  
+Standard format (not wide) but with only 42 frames per second
+raspivid --nopreview --shutter 2500 --width 1280 --height 960 --framerate 42 --timeout 10000 --output video_1Mpx_42fps.h264  
+Lower resolution but with 90 frames per second
+raspivid --nopreview --shutter 2500 --width 640 --height 480 --framerate 90 --timeout 10000 --output video_vga_90fps_slow_motion.h264  
+To convert a video to mp4, which is playable in the browser and even on Windows Phone
+avconv -i video_1Mpx_49fps_wide_low_bitrate_2000000.h264 -vcodec copy video_1Mpx_49fps_wide_low_bitrate_2000000.mp4  
+To convert a series of jpeg files into an mp4 video (very slow)
+avconv -qscale 5 -r 5 -b 9600 -i video_frame_%04d.jpg timelapse.mp4  
+To extract one jpg file per second (-r 1) from a h264 video with a frame rate of 49 (-r 49).
+avconv -r 49 -i video_1Mpx_49fps_wide.h264 -r 1 -f image2 Out%00d.jpg  
+
+WHY FFMPEG NEEDS NO UPDATE
+ffmpeg is a tool to encode or decode videos and it does a lot more. If you have the package libav-tools installed and type ffmpeg -version on the console, then you will see the text "ffmpeg version 0.8.13" and the text "*** THIS PROGRAM IS DEPRECATED *** This program is only provided for compatibility and will be removed in a future release. Please use avconv instead.". 
+Well as I learned, Debian, Ubuntu and Raspian do not contain a version of ffmpeg from FFmpeg.org but the ffmpeg tool is supplied by libav.org/avconv. That is why it also says "Copyright (c) 2000-2014 the Libav developers" and why it uses libav libraries. (See here) 
+So it is not necessary to update ffmpeg to a newer version than 0.8.13 because it is just a wrapper to avconv. But it is possible to install the ffmpeg version from FFmpeg.org but I did not find a package for the RPi for it. 
